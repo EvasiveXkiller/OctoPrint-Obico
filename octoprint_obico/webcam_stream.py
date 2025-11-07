@@ -112,6 +112,10 @@ def find_ffmpeg_h264_encoder():
         'amd': [
             ('h264_vaapi', '-c:v h264_vaapi'),
         ],
+        'nvidia': [
+            ('h264_nvenc', '-c:v h264_nvenc'),
+            ('nvenc_h264', '-c:v nvenc_h264'),  # Older FFmpeg versions
+        ],
         'generic': [
             ('h264_vaapi', '-c:v h264_vaapi'),
         ]
@@ -138,6 +142,11 @@ def find_ffmpeg_h264_encoder():
                     FFMPEG, '-init_hw_device', 'qsv=hw', '-filter_hw_device', 'hw',
                     '-re', '-i', test_video, '-t', '2',
                     '-vf', 'hwupload=extra_hw_frames=64,format=qsv'
+                ] + encoder_flags.split() + ['-an', '-f', 'null', '-']
+            elif 'nvenc' in encoder_name:
+                # NVENC is simple - works like software encoders but on GPU
+                ffmpeg_args = [
+                    FFMPEG, '-re', '-i', test_video, '-t', '2'
                 ] + encoder_flags.split() + ['-an', '-f', 'null', '-']
             else:
                 # RPi and other encoders
@@ -482,6 +491,16 @@ class WebcamStreamer:
                     '-re', '-i', stream_url,
                     '-vf', filter_chain,
                     '-b:v', str(bitrate)
+                ] + encoder.split()
+            elif 'nvenc' in encoder:
+                # NVENC: Simple and efficient GPU encoding
+                filter_chain = f'fps={fps},scale={img_w}:{img_h}'
+                ffmpeg_args = [
+                    '-re', '-i', stream_url,
+                    '-vf', filter_chain,
+                    '-b:v', str(bitrate),
+                    '-preset', 'p2',  # Fast preset for low latency
+                    '-tune', 'll',    # Low latency tuning
                 ] + encoder.split()
             else:
                 # RPi encoders and fallback: standard pipeline

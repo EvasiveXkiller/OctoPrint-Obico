@@ -1,8 +1,8 @@
-# VA-API Hardware Acceleration Setup Guide
+# GPU Hardware Acceleration Setup Guide
 
 ## Overview
 
-OctoPrint-Obico now supports hardware-accelerated H.264 video encoding using VA-API (Video Acceleration API) for Intel and AMD GPUs. This significantly reduces CPU usage during webcam streaming, especially at higher resolutions and frame rates.
+OctoPrint-Obico now supports hardware-accelerated H.264 video encoding using your GPU. This significantly reduces CPU usage during webcam streaming, especially at higher resolutions and frame rates.
 
 ### Supported Platforms
 
@@ -10,6 +10,7 @@ OctoPrint-Obico now supports hardware-accelerated H.264 video encoding using VA-
 |----------|-----------------|-------|
 | **Intel** (HD Graphics 2000+) | h264_vaapi, h264_qsv | Broadwell (Gen 8) and newer recommended |
 | **AMD** (with AMDGPU driver) | h264_vaapi | Requires mesa-va-drivers |
+| **NVIDIA** (GTX 600+) | h264_nvenc | Requires proprietary NVIDIA drivers |
 | **Raspberry Pi** | h264_omx, h264_v4l2m2m | Already supported (no changes needed) |
 | **Generic x86/x64** | Software fallback (MJPEG) | If no GPU or drivers |
 
@@ -17,20 +18,21 @@ OctoPrint-Obico now supports hardware-accelerated H.264 video encoding using VA-
 
 ## System Requirements
 
-### Minimum Requirements
+### Intel / AMD (VA-API)
 
 - **Operating System:** Linux (Ubuntu, Debian, Fedora, Arch, etc.)
 - **GPU:** 
   - Intel HD Graphics 2000 or newer (Gen 5+)
   - AMD GPU with AMDGPU driver support
 - **FFmpeg:** Version 4.0 or newer with VA-API support
-- **Drivers:** Platform-specific VA-API drivers (see installation below)
+- **Drivers:** Platform-specific VA-API drivers
 
-### Recommended Requirements
+### NVIDIA (NVENC)
 
-- **FFmpeg:** Version 4.4 or newer
-- **Intel:** 6th generation (Skylake) or newer for best performance
-- **Mesa:** Version 20.0 or newer (for AMD)
+- **GPU:** GeForce GTX 600 series or newer, Quadro, Tesla
+- **Drivers:** NVIDIA proprietary drivers (>=390.x)
+- **FFmpeg:** Version 4.0 or newer with NVENC support
+- **Note:** Does NOT work with nouveau (open-source) drivers
 
 ---
 
@@ -38,7 +40,7 @@ OctoPrint-Obico now supports hardware-accelerated H.264 video encoding using VA-
 
 ### Ubuntu / Debian
 
-#### For Intel GPUs
+#### For Intel GPUs (VA-API)
 
 **Modern Intel (Broadwell/Gen 8 and newer):**
 ```bash
@@ -52,24 +54,55 @@ sudo apt-get update
 sudo apt-get install -y i965-va-driver vainfo
 ```
 
-#### For AMD GPUs
+#### For AMD GPUs (VA-API)
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y mesa-va-drivers vainfo
 ```
 
+#### For NVIDIA GPUs (NVENC)
+
+**Install NVIDIA Proprietary Drivers:**
+```bash
+# Check if proprietary drivers are already installed
+nvidia-smi
+
+# If not installed, install them:
+sudo apt-get update
+sudo apt-get install -y nvidia-driver-535  # or latest version
+
+# Reboot after driver installation
+sudo reboot
+```
+
+**Verify NVENC Support:**
+```bash
+# Check GPU capabilities
+nvidia-smi
+
+# Check FFmpeg NVENC support
+ffmpeg -encoders | grep nvenc
+
+# Should show:
+# V..... h264_nvenc           NVIDIA NVENC H.264 encoder (codec h264)
+```
+
 #### Verify FFmpeg Support
 
 ```bash
-# Check if FFmpeg has VA-API support
+# For VA-API (Intel/AMD)
 ffmpeg -encoders | grep vaapi
 
-# Should show output like:
+# For NVENC (NVIDIA)
+ffmpeg -encoders | grep nvenc
+
+# Should show encoders like:
 # V..... h264_vaapi           H.264/AVC (VAAPI) (codec h264)
+# V..... h264_nvenc           NVIDIA NVENC H.264 encoder (codec h264)
 ```
 
-If VA-API encoders are not listed, install FFmpeg:
+If encoders are not listed, install/reinstall FFmpeg:
 ```bash
 sudo apt-get install -y ffmpeg libva-drm2
 ```
@@ -90,6 +123,20 @@ sudo dnf install -y libva-intel-driver libva-utils
 
 ```bash
 sudo dnf install -y mesa-va-drivers libva-utils
+```
+
+#### For NVIDIA GPUs
+
+```bash
+# Enable RPM Fusion repositories first
+sudo dnf install -y https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
+sudo dnf install -y https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+
+# Install NVIDIA drivers
+sudo dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda
+
+# Reboot
+sudo reboot
 ```
 
 ### Arch Linux
