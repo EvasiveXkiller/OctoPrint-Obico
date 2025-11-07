@@ -4,6 +4,8 @@
 
 OctoPrint-Obico now supports hardware-accelerated H.264 video encoding using your GPU. This significantly reduces CPU usage during webcam streaming, especially at higher resolutions and frame rates.
 
+> **Using Docker?** See **[Docker GPU Setup Guide](DOCKER_GPU_SETUP.md)** for container-specific instructions.
+
 ### Supported Platforms
 
 | Platform | Hardware Encoder | Notes |

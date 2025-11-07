@@ -4,6 +4,8 @@
 **Date:** November 7, 2025  
 **Status:** Ready for Testing
 
+> **Docker Users:** See **[Docker GPU Setup Guide](docs/DOCKER_GPU_SETUP.md)** for container-specific configuration.
+
 ---
 
 ## What's New
