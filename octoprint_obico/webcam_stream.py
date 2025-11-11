@@ -493,15 +493,22 @@ class WebcamStreamer:
                     '-s', f'{img_w}x{img_h}'
                 ] + encoder.split()
             
-            self.start_ffmpeg(rtp_port, ffmpeg_args)
+            # Enable auto-restart for h264 transcode streams
+            # This ensures the stream recovers if FFmpeg dies unexpectedly
+            self.start_ffmpeg(rtp_port, ffmpeg_args, retry_after_quit=True)
         except Exception:
             self.plugin.sentry.captureException()
 
 
     @backoff.on_exception(backoff.expo, Exception, base=3, jitter=None, max_tries=5) # webcam-streamer may start after ffmpeg. We should retry in this case
     def start_ffmpeg(self, rtp_port, ffmpeg_args, retry_after_quit=False):
+        # Add timeout flags to prevent infinite loops when source/sink dies
+        # -timeout: HTTP read timeout (5 seconds of no data = exit)
+        # -stimeout: Socket/stream timeout (10 seconds for initial connection)
+        timeout_args = ['-timeout', '5000000', '-stimeout', '10000000']  # microseconds
+        
         # Build full command as list
-        ffmpeg_cmd = [FFMPEG, '-loglevel', 'error'] + ffmpeg_args + ['-an', '-f', 'rtp', f'rtp://127.0.0.1:{rtp_port}?pkt_size=1300']
+        ffmpeg_cmd = [FFMPEG, '-loglevel', 'error'] + timeout_args + ffmpeg_args + ['-an', '-f', 'rtp', f'rtp://127.0.0.1:{rtp_port}?pkt_size=1300']
 
         _logger.debug('Popen: {}'.format(' '.join(ffmpeg_cmd)))
         FNULL = open(os.devnull, 'w')
@@ -538,17 +545,65 @@ class WebcamStreamer:
                     if retry_after_quit:
                         ffmpeg_backoff.more('ffmpeg exited un-expectedly. Exit code: {}'.format(returncode))
                         ring_buffer = deque(maxlen=50)
-                        _logger.debug('Popen: {}'.format(ffmpeg_cmd))
-                        ffmpeg_proc = subprocess.Popen(ffmpeg_cmd.split(' '), stdin=subprocess.PIPE, stdout=FNULL, stderr=subprocess.PIPE)
+                        _logger.debug('Restarting FFmpeg: {}'.format(' '.join(ffmpeg_cmd)))
+                        # Use the list directly, don't split (ffmpeg_cmd is already a list)
+                        ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stdout=FNULL, stderr=subprocess.PIPE)
                     else:
                         self.plugin.sentry.captureMessage('ffmpeg exited un-expectedly. Exit code: {}'.format(returncode))
                         return
                 else:
                     ring_buffer.append(line)
 
+        def watchdog_ffmpeg_process(ffmpeg_proc):
+            """
+            Monitor FFmpeg CPU usage and kill if it gets stuck in infinite loop.
+            This handles cases where output RTP port dies but FFmpeg doesn't detect it.
+            """
+            try:
+                proc = psutil.Process(ffmpeg_proc.pid)
+                high_cpu_count = 0
+                check_interval = 5  # Check every 5 seconds
+                
+                while ffmpeg_proc.poll() is None:  # While process is running
+                    if self.shutting_down:
+                        return
+                    
+                    time.sleep(check_interval)
+                    
+                    try:
+                        # Get CPU usage over 1 second interval
+                        cpu_percent = proc.cpu_percent(interval=1.0)
+                        
+                        # If CPU > 80% for multiple consecutive checks, likely stuck
+                        if cpu_percent > 80:
+                            high_cpu_count += 1
+                            _logger.warning(f'FFmpeg PID {ffmpeg_proc.pid} high CPU: {cpu_percent:.1f}% (count: {high_cpu_count})')
+                            
+                            # Kill if stuck for 30+ seconds (6 checks * 5 second interval)
+                            if high_cpu_count >= 6:
+                                _logger.error(f'FFmpeg PID {ffmpeg_proc.pid} stuck in infinite loop (CPU {cpu_percent:.1f}% for 30s). Killing process.')
+                                self.plugin.sentry.captureMessage(f'FFmpeg stuck in infinite loop - killed (CPU: {cpu_percent:.1f}%)')
+                                proc.kill()
+                                return
+                        else:
+                            # Reset counter if CPU drops below threshold
+                            high_cpu_count = 0
+                            
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        # Process died or we lost access
+                        return
+                        
+            except Exception as e:
+                _logger.error(f'Watchdog error for FFmpeg PID {ffmpeg_proc.pid}: {e}')
+
         ffmpeg_thread = Thread(target=monitor_ffmpeg_process, kwargs=dict(ffmpeg_proc=ffmpeg_proc, retry_after_quit=retry_after_quit))
         ffmpeg_thread.daemon = True
         ffmpeg_thread.start()
+        
+        # Start CPU watchdog thread
+        watchdog_thread = Thread(target=watchdog_ffmpeg_process, args=(ffmpeg_proc,))
+        watchdog_thread.daemon = True
+        watchdog_thread.start()
 
     def mjpeg_webrtc(self, webcam):
 
