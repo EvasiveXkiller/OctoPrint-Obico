@@ -502,10 +502,10 @@ class WebcamStreamer:
 
     @backoff.on_exception(backoff.expo, Exception, base=3, jitter=None, max_tries=5) # webcam-streamer may start after ffmpeg. We should retry in this case
     def start_ffmpeg(self, rtp_port, ffmpeg_args, retry_after_quit=False):
-        # Add timeout flags to prevent infinite loops when source/sink dies
-        # -timeout: HTTP read timeout (5 seconds of no data = exit)
-        # -stimeout: Socket/stream timeout (10 seconds for initial connection)
-        timeout_args = ['-timeout', '5000000', '-stimeout', '10000000']  # microseconds
+        # Add timeout flag to prevent infinite loops when source dies
+        # -timeout: HTTP/TCP read timeout (5 seconds of no data = exit)
+        # This prevents FFmpeg from hanging when input stream stops responding
+        timeout_args = ['-timeout', '5000000']  # 5 seconds in microseconds
         
         # Build full command as list
         ffmpeg_cmd = [FFMPEG, '-loglevel', 'error'] + timeout_args + ffmpeg_args + ['-an', '-f', 'rtp', f'rtp://127.0.0.1:{rtp_port}?pkt_size=1300']
