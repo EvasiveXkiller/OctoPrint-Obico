@@ -700,7 +700,7 @@ class WebcamStreamer:
             preconfigured = json.loads(os.getenv('PRECONFIGURED_WEBCAMS'))
 
             if preconfigured:
-                self.janus = JanusConn(self.plugin, preconfigured['janus_server'], JANUS_WS_PORT)
+                self.janus = JanusConn(self.plugin, preconfigured['janus_server'])
                 self.janus.start_janus_ws()
 
         return preconfigured
